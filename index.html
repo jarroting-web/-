@@ -2,18 +2,11 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <!-- 加入 viewport-fit=cover 解決 iPhone 瀏海問題 -->
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>閱讀紀錄器</title>
-
-    <!-- === iPhone App 神奇標籤 === -->
-    <!-- 開啟全螢幕模式 -->
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <!-- 設定狀態列為透明（內容會延伸到狀態列下方） -->
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <!-- App 在桌面上的名稱 -->
     <meta name="apple-mobile-web-app-title" content="閱讀紀錄">
-    <!-- App 圖示 (這是一個漂亮的書本圖示) -->
     <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3389/3389081.png">
 
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
@@ -21,7 +14,6 @@
     
     <style>
         :root {
-            /* 自動抓取 iPhone 螢幕安全區域的距離 */
             --safe-top: env(safe-area-inset-top);
             --safe-bottom: env(safe-area-inset-bottom);
         }
@@ -30,10 +22,8 @@
             color: #f1f5f9; 
             min-height: 100vh; 
             font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            /* 防止內容被瀏海遮住 */
             padding-top: calc(var(--safe-top) + 20px);
             padding-bottom: calc(var(--safe-bottom) + 20px);
-            /* 禁止下拉重新整理（更像 App） */
             overscroll-behavior-y: none;
             -webkit-tap-highlight-color: transparent;
         }
@@ -42,9 +32,18 @@
         .custom-scrollbar::-webkit-scrollbar { width: 4px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
         .btn-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); }
-        
-        /* 讓按鈕在手機上更有觸感 */
         button:active { transform: scale(0.96); transition: 0.1s; }
+        
+        /* 完讀次數的小標籤樣式 */
+        .complete-badge {
+            background: rgba(16, 185, 129, 0.2);
+            color: #10b981;
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            padding: 2px 8px;
+            border-radius: 8px;
+            font-size: 11px;
+            font-weight: bold;
+        }
     </style>
 </head>
 <body>
@@ -73,13 +72,13 @@
                 <div class="flex gap-2">
                     <input type="text" id="book-name-input" placeholder="想讀什麼書？" 
                         class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 outline-none text-white focus:border-blue-500 text-base">
-                    <button id="add-book-btn" class="bg-blue-600 hover:bg-blue-500 px-5 py-3 rounded-xl font-bold transition shadow-lg shadow-blue-900/20">新增</button>
+                    <button id="add-book-btn" class="bg-blue-600 hover:bg-blue-500 px-5 py-3 rounded-xl font-bold transition shadow-lg">新增</button>
                 </div>
             </section>
 
             <!-- 書架 -->
             <div id="book-shelf" class="space-y-4">
-                <p class="text-slate-500 italic py-10 text-center text-sm">正在從雲端載入紀錄...</p>
+                <p class="text-slate-500 italic py-10 text-center text-sm">載入中...</p>
             </div>
         </div>
 
@@ -139,19 +138,26 @@
             async function loadBooks() {
                 const { data: books } = await _supabase.from('books').select('*').order('created_at', { ascending: false });
                 const { data: sessions } = await _supabase.from('reading_sessions').select('*');
+                const { data: completions } = await _supabase.from('book_completions').select('*');
+                
                 const shelf = document.getElementById('book-shelf');
                 shelf.innerHTML = books?.length ? '' : '<p class="text-slate-500 italic py-10 text-center text-sm">書架目前是空的。</p>';
                 
                 books?.forEach(book => {
                     const sec = sessions?.filter(s => s.book_id === book.id).reduce((a, b) => a + (b.duration_seconds || 0), 0) || 0;
+                    const compCount = completions?.filter(c => c.book_id === book.id).length || 0;
+                    
                     const div = document.createElement('div');
-                    div.className = 'glass-card p-5 rounded-3xl flex justify-between items-center cursor-pointer active:bg-slate-800 transition shadow-md';
+                    div.className = 'glass-card p-5 rounded-3xl flex justify-between items-center cursor-pointer active:bg-slate-800 transition shadow-md relative';
                     div.innerHTML = `
-                        <div>
-                            <h3 class="font-bold text-lg text-blue-50">${book.title}</h3>
+                        <div class="flex-1">
+                            <div class="flex justify-between items-start pr-8">
+                                <h3 class="font-bold text-lg text-blue-50">${book.title}</h3>
+                                ${compCount > 0 ? `<span class="complete-badge">讀完 ${compCount} 次</span>` : ''}
+                            </div>
                             <p class="text-slate-500 text-xs mt-1 tracking-wide">累計：<span class="text-blue-400 font-mono font-bold">${formatTime(sec)}</span></p>
                         </div>
-                        <div class="bg-slate-800 h-10 w-10 rounded-full flex items-center justify-center text-blue-400">→</div>
+                        <div class="bg-slate-800 h-10 w-10 rounded-full flex items-center justify-center text-blue-400 ml-4">→</div>
                     `;
                     div.onclick = () => showDetail(book.id);
                     shelf.appendChild(div);
@@ -166,16 +172,24 @@
             async function showDetail(id) {
                 const { data: book } = await _supabase.from('books').select('*').eq('id', id).single();
                 const { data: sessions } = await _supabase.from('reading_sessions').select('*').eq('book_id', id).order('created_at', {ascending: false});
-                const { data: comps } = await _supabase.from('book_completions').select('*').eq('id', id); // 修正語法
+                const { data: comps } = await _supabase.from('book_completions').select('*').eq('book_id', id); // 修正為 book_id
                 
                 document.getElementById('book-modal').classList.remove('hidden');
                 const total = sessions?.reduce((a,b) => a + (b.duration_seconds || 0), 0) || 0;
+                const compCount = comps?.length || 0;
                 const content = document.getElementById('modal-content');
                 
                 content.innerHTML = `
-                    <div class="text-left">
-                        <h2 class="text-xl font-bold mb-1 text-white">${book.title}</h2>
-                        <p class="text-blue-400 text-sm font-mono mb-6">總時數：${formatTime(total)}</p>
+                    <div class="text-left relative">
+                        <div class="pr-12">
+                            <h2 class="text-xl font-bold mb-1 text-white">${book.title}</h2>
+                            <p class="text-blue-400 text-sm font-mono mb-6">總時數：${formatTime(total)}</p>
+                        </div>
+                        
+                        <!-- 右上方次數標記 -->
+                        <div class="absolute top-0 right-8">
+                            ${compCount > 0 ? `<span class="complete-badge">已讀完 ${compCount} 次</span>` : ''}
+                        </div>
 
                         <div class="flex gap-3 mb-8">
                             <button id="timer-ctrl" class="flex-1 bg-blue-600 py-4 rounded-2xl font-bold text-lg shadow-lg">開始閱讀計時</button>
@@ -237,8 +251,8 @@
             async function markComp(id) {
                 if(confirm('確認已讀完一遍？')) { 
                     await _supabase.from('book_completions').insert([{ book_id: id }]); 
-                    alert('恭喜又讀完一本！');
                     await showDetail(id); 
+                    await loadBooks();
                 }
             }
 
