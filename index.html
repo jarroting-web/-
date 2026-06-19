@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>我的閱讀時光紀錄</title>
+    <title>我的閱讀紀錄</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -12,49 +12,55 @@
         .active-tab { border-bottom: 3px solid #60a5fa; color: #60a5fa; }
         .custom-scrollbar::-webkit-scrollbar { width: 6px; }
         .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 10px; }
+        .btn-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); }
+        .btn-danger:hover { background: #ef4444; color: white; }
     </style>
 </head>
 <body class="p-4 md:p-8">
 
-    <div class="max-w-4xl mx-auto">
+    <div class="max-w-3xl mx-auto">
+        <!-- 頂部切換 -->
         <nav class="flex justify-center gap-8 mb-8 text-sm font-bold uppercase tracking-widest text-slate-500 border-b border-slate-800">
             <button id="btn-shelf" class="pb-2 active-tab">我的書架</button>
-            <button id="btn-stats" class="pb-2">數據統計</button>
+            <button id="btn-stats" class="pb-2">年度統計</button>
         </nav>
 
         <div id="page-shelf">
-            <header class="mb-8 flex justify-between items-end">
+            <header class="mb-8 flex justify-between items-center">
                 <div>
-                    <h1 class="text-3xl font-bold text-blue-400">閱讀紀錄器</h1>
-                    <p class="text-slate-400">記錄每一段專注的時光</p>
+                    <h1 class="text-3xl font-bold text-blue-400">閱讀紀錄</h1>
+                    <p class="text-slate-400">管理你的閱讀時光</p>
                 </div>
-                <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 min-w-[140px] text-right">
-                    <p class="text-[10px] text-slate-400 uppercase">本月累計</p>
-                    <p class="text-2xl font-mono text-blue-400" id="monthly-total">0.0h</p>
+                <div class="bg-slate-800/50 p-4 rounded-2xl border border-slate-700 text-right min-w-[120px]">
+                    <p class="text-[10px] text-slate-400">本月讀書</p>
+                    <p class="text-xl font-mono text-blue-400" id="monthly-total">0m</p>
                 </div>
             </header>
 
+            <!-- 新增書名區 -->
             <section class="glass-card p-6 rounded-3xl mb-8">
                 <div class="flex gap-2">
-                    <input type="text" id="book-search-input" placeholder="搜尋書名或手動輸入..." class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 outline-none text-white focus:border-blue-500">
-                    <button id="search-btn" class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-xl font-bold transition">搜尋</button>
+                    <input type="text" id="book-name-input" placeholder="請輸入欲新增的書名..." 
+                        class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 outline-none text-white focus:border-blue-500">
+                    <button id="add-book-btn" class="bg-blue-600 hover:bg-blue-500 px-8 py-3 rounded-xl font-bold transition">新增書籍</button>
                 </div>
-                <div id="search-results" class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4 text-xs"></div>
             </section>
 
-            <div id="book-shelf" class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                <p class="text-slate-500 italic py-10 w-full text-center">正在載入...</p>
+            <!-- 書架 -->
+            <div id="book-shelf" class="grid grid-cols-1 gap-4">
+                <p class="text-slate-500 italic py-10 w-full text-center text-sm">載入資料中...</p>
             </div>
         </div>
 
         <div id="page-stats" class="hidden">
-            <h2 class="text-2xl font-bold mb-6 text-blue-400">閱讀大數據</h2>
+            <h2 class="text-xl font-bold mb-6 text-blue-400">閱讀大數據統計</h2>
             <div id="stats-container" class="space-y-4"></div>
         </div>
     </div>
 
+    <!-- 詳情彈窗 -->
     <div id="book-modal" class="hidden fixed inset-0 bg-black/90 flex items-center justify-center p-4 z-50">
-        <div class="glass-card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 md:p-8 rounded-3xl relative custom-scrollbar">
+        <div class="glass-card w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 md:p-8 rounded-3xl relative custom-scrollbar">
             <button id="close-modal-btn" class="absolute top-4 right-4 text-slate-400 text-4xl hover:text-white">&times;</button>
             <div id="modal-content"></div>
         </div>
@@ -66,19 +72,28 @@
             const SUPABASE_KEY = 'sb_publishable_37I7ZAUEw3W4YzruD71MtQ_JCeyPnrs';
             let _supabase, activeTimer, startTime;
 
-            async function init() {
-                try {
-                    _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-                    setupEventListeners();
-                    await loadBooks();
-                } catch (e) { console.error("Init Error:", e); }
+            // 格式化時間：將秒轉為 人類直觀格式
+            function formatTime(totalSeconds) {
+                if (totalSeconds <= 0) return "0 分鐘";
+                if (totalSeconds < 60) return `${totalSeconds} 秒`;
+                
+                const hours = Math.floor(totalSeconds / 3600);
+                const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+                if (hours > 0) {
+                    return minutes > 0 ? `${hours} 小時 ${minutes} 分` : `${hours} 小時`;
+                } else {
+                    return `${minutes} 分鐘`;
+                }
             }
 
-            function setupEventListeners() {
-                document.getElementById('search-btn').onclick = searchBook;
+            async function init() {
+                _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                document.getElementById('add-book-btn').onclick = addBook;
                 document.getElementById('btn-shelf').onclick = () => switchTab('shelf');
                 document.getElementById('btn-stats').onclick = () => switchTab('stats');
                 document.getElementById('close-modal-btn').onclick = closeModal;
+                await loadBooks();
             }
 
             function switchTab(tab) {
@@ -89,50 +104,12 @@
                 if(tab === 'stats') loadStats();
             }
 
-            function fixImg(url) {
-                if(!url || url === '') return 'https://via.placeholder.com/150x200?text=Book';
-                return url.replace('http://', 'https://');
-            }
-
-            async function searchBook() {
-                const q = document.getElementById('book-search-input').value;
-                if(!q) return;
-                const resDiv = document.getElementById('search-results');
-                resDiv.innerHTML = '搜尋中...';
-                
-                try {
-                    const r = await fetch(`https://www.googleapis.com/books/v1/volumes?q=${encodeURIComponent(q)}`);
-                    if(r.status === 429) { resDiv.innerHTML = '<p class="text-yellow-500">Google 搜尋暫時忙碌中，請直接新增。</p>'; addManualBtn(q); return; }
-                    const d = await r.json();
-                    resDiv.innerHTML = '';
-                    if(!d.items) { addManualBtn(q); return; }
-                    
-                    d.items.slice(0,4).forEach(item => {
-                        const info = item.volumeInfo;
-                        const cover = fixImg(info.imageLinks?.thumbnail);
-                        const div = document.createElement('div');
-                        div.className = 'bg-slate-800 p-3 rounded-xl text-center border border-slate-700';
-                        div.innerHTML = `<img src="${cover}" class="w-full h-32 object-cover mb-2 rounded shadow-sm"><p class="truncate mb-2 font-bold">${info.title}</p><button class="bg-blue-600 w-full py-1 rounded add-btn font-bold">加入</button>`;
-                        div.querySelector('.add-btn').onclick = () => addBook(info.title, cover);
-                        resDiv.appendChild(div);
-                    });
-                } catch(e) { addManualBtn(q); }
-            }
-
-            function addManualBtn(q) {
-                const resDiv = document.getElementById('search-results');
-                const div = document.createElement('div');
-                div.className = 'col-span-full p-4 border border-dashed border-slate-700 rounded-xl text-center';
-                div.innerHTML = `<p class="mb-2">無法取得封面？</p><button class="bg-slate-700 px-4 py-2 rounded-lg font-bold">手動新增「${q}」</button>`;
-                div.querySelector('button').onclick = () => addBook(q, '');
-                resDiv.appendChild(div);
-            }
-
-            async function addBook(t, c) {
-                const { error } = await _supabase.from('books').insert([{ title: t, cover_url: c || '' }]);
+            async function addBook() {
+                const title = document.getElementById('book-name-input').value;
+                if(!title) return;
+                const { error } = await _supabase.from('books').insert([{ title }]);
                 if(error) alert("新增失敗");
-                document.getElementById('search-results').innerHTML = '';
-                document.getElementById('book-search-input').value = '';
+                document.getElementById('book-name-input').value = '';
                 await loadBooks();
             }
 
@@ -140,21 +117,28 @@
                 const { data: books } = await _supabase.from('books').select('*').order('created_at', { ascending: false });
                 const { data: sessions } = await _supabase.from('reading_sessions').select('*');
                 const shelf = document.getElementById('book-shelf');
-                shelf.innerHTML = books?.length ? '' : '<p class="text-slate-500 italic py-10 w-full text-center">書架是空的，快新增書籍吧！</p>';
+                shelf.innerHTML = books?.length ? '' : '<p class="text-slate-500 italic py-10 text-center text-sm">目前沒有書籍，請新增書名。</p>';
                 
                 books?.forEach(book => {
                     const sec = sessions?.filter(s => s.book_id === book.id).reduce((a, b) => a + (b.duration_seconds || 0), 0) || 0;
                     const div = document.createElement('div');
-                    div.className = 'glass-card p-4 rounded-2xl flex gap-4 cursor-pointer hover:bg-slate-800 transition shadow-lg';
-                    div.innerHTML = `<img src="${fixImg(book.cover_url)}" class="w-20 h-28 rounded object-cover shadow-md"><div><h3 class="font-bold text-lg text-blue-100">${book.title}</h3><p class="text-blue-400 font-mono text-sm">${(sec/3600).toFixed(1)}h 累積</p></div>`;
+                    div.className = 'glass-card p-5 rounded-2xl flex justify-between items-center cursor-pointer hover:bg-slate-800 transition shadow-lg';
+                    div.innerHTML = `
+                        <div>
+                            <h3 class="font-bold text-lg text-blue-100">${book.title}</h3>
+                            <p class="text-slate-400 text-sm">累計：<span class="text-blue-400 font-mono">${formatTime(sec)}</span></p>
+                        </div>
+                        <div class="text-slate-500 text-xl">→</div>
+                    `;
                     div.onclick = () => showDetail(book.id);
                     shelf.appendChild(div);
                 });
 
+                // 本月計算
                 const now = new Date();
                 const startM = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
                 const mSec = sessions?.filter(s => s.start_time >= startM).reduce((a, b) => a + (b.duration_seconds || 0), 0) || 0;
-                document.getElementById('monthly-total').innerText = (mSec/3600).toFixed(1) + 'h';
+                document.getElementById('monthly-total').innerText = formatTime(mSec);
             }
 
             async function showDetail(id) {
@@ -165,30 +149,62 @@
                 document.getElementById('book-modal').classList.remove('hidden');
                 const total = sessions?.reduce((a,b) => a + (b.duration_seconds || 0), 0) || 0;
                 const content = document.getElementById('modal-content');
+                
                 content.innerHTML = `
-                    <div class="flex flex-col md:flex-row gap-8 text-left">
-                        <div class="md:w-1/3 text-center">
-                            <img src="${fixImg(book.cover_url)}" class="w-40 h-56 rounded-xl mx-auto mb-4 object-cover shadow-2xl border border-slate-700">
-                            <div class="grid grid-cols-2 gap-2">
-                                <div class="bg-slate-900/50 p-2 rounded-xl border border-slate-800"><p class="text-[10px] text-slate-500 uppercase">時數</p><p class="text-xl font-mono text-blue-400">${(total/3600).toFixed(1)}h</p></div>
-                                <div class="bg-slate-900/50 p-2 rounded-xl border border-slate-800"><p class="text-[10px] text-slate-500 uppercase">完讀</p><p class="text-xl font-mono text-green-400">${comps?.length || 0}</p></div>
+                    <div class="text-left">
+                        <h2 class="text-2xl font-bold mb-2 text-white">${book.title}</h2>
+                        <div class="flex gap-4 mb-8">
+                            <div class="bg-slate-900/50 p-3 rounded-xl border border-slate-800 flex-1">
+                                <p class="text-[10px] text-slate-500 uppercase">總閱讀時間</p>
+                                <p class="text-xl font-mono text-blue-400">${formatTime(total)}</p>
+                            </div>
+                            <div class="bg-slate-900/50 p-3 rounded-xl border border-slate-800 flex-1">
+                                <p class="text-[10px] text-slate-500 uppercase">讀完次數</p>
+                                <p class="text-xl font-mono text-green-400">${comps?.length || 0} 次</p>
                             </div>
                         </div>
-                        <div class="flex-1">
-                            <h2 class="text-2xl font-bold mb-6 text-white">${book.title}</h2>
-                            <div class="flex gap-2 mb-6">
-                                <button id="timer-ctrl" class="flex-1 bg-blue-600 py-4 rounded-xl font-bold text-lg shadow-blue-900/20 shadow-lg transition">開始閱讀</button>
-                                <button id="comp-btn" class="bg-emerald-700 px-6 rounded-xl font-bold hover:bg-emerald-600 transition">讀完</button>
-                            </div>
-                            <h4 class="text-xs font-bold text-slate-500 uppercase mb-3 border-b border-slate-800 pb-1">閱讀紀錄</h4>
-                            <div class="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
-                                ${sessions?.length ? sessions.map(s => `<div class="flex justify-between bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-sm"><span class="text-slate-400">${new Date(s.start_time).toLocaleDateString()}</span><span class="font-mono text-blue-300">${Math.floor(s.duration_seconds/60)}m</span></div>`).join('') : '<p class="text-slate-600 italic">尚無紀錄</p>'}
-                            </div>
+
+                        <div class="flex gap-2 mb-8">
+                            <button id="timer-ctrl" class="flex-1 bg-blue-600 py-4 rounded-xl font-bold text-lg shadow-lg">開始閱讀計時</button>
+                            <button id="comp-btn" class="bg-emerald-700 px-6 rounded-xl font-bold hover:bg-emerald-600">讀完</button>
                         </div>
+
+                        <h4 class="text-xs font-bold text-slate-500 uppercase mb-3 border-b border-slate-800 pb-1">閱讀紀錄 (可刪除)</h4>
+                        <div class="space-y-2 max-h-52 overflow-y-auto custom-scrollbar mb-8">
+                            ${sessions?.length ? sessions.map(s => `
+                                <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded-lg border border-slate-800 text-sm">
+                                    <span class="text-slate-400">${new Date(s.start_time).toLocaleDateString()} ${new Date(s.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}</span>
+                                    <div class="flex items-center gap-3">
+                                        <span class="font-mono text-blue-300">${formatTime(s.duration_seconds)}</span>
+                                        <button onclick="window._deleteSession('${s.id}', '${id}')" class="text-red-500 hover:text-red-300 text-xs px-2 py-1">刪除</button>
+                                    </div>
+                                </div>`).join('') : '<p class="text-slate-600 italic">尚無計時紀錄</p>'}
+                        </div>
+
+                        <button id="delete-book-btn" class="w-full btn-danger py-3 rounded-xl text-sm font-bold transition">
+                            從書架移除這本書 (包含所有紀錄)
+                        </button>
                     </div>`;
 
                 document.getElementById('timer-ctrl').onclick = () => toggleTimer(id);
                 document.getElementById('comp-btn').onclick = () => markComp(id);
+                document.getElementById('delete-book-btn').onclick = () => deleteBook(id);
+            }
+
+            // 刪除單次紀錄
+            window._deleteSession = async (sessionId, bookId) => {
+                if(!confirm('確定要刪除這筆閱讀時間紀錄嗎？')) return;
+                await _supabase.from('reading_sessions').delete().eq('id', sessionId);
+                await showDetail(bookId);
+                await loadBooks();
+            };
+
+            // 刪除整本書
+            async function deleteBook(id) {
+                if(!confirm('警告：這將會永久刪除這本書的所有閱讀歷程與數據。確定要刪除嗎？')) return;
+                await _supabase.from('books').delete().eq('id', id);
+                closeModal();
+                await loadBooks();
             }
 
             async function toggleTimer(id) {
@@ -198,7 +214,7 @@
                     btn.classList.replace('bg-blue-600', 'bg-red-600');
                     activeTimer = setInterval(() => {
                         const s = Math.floor((new Date() - startTime)/1000);
-                        btn.innerText = `停止 (${Math.floor(s/60)}m ${s%60}s)`;
+                        btn.innerText = `結束閱讀 (${Math.floor(s/60)}m ${s%60}s)`;
                     }, 1000);
                 } else {
                     const d = Math.floor((new Date() - startTime)/1000);
@@ -211,7 +227,7 @@
             }
 
             async function markComp(id) {
-                if(confirm('確認這本書讀完一次了嗎？')) { 
+                if(confirm('確認這本書讀完一次了嗎？這會增加完讀次數。')) { 
                     await _supabase.from('book_completions').insert([{ book_id: id }]); 
                     await showDetail(id); 
                 }
@@ -226,14 +242,14 @@
                     months[m] = (months[m] || 0) + (s.duration_seconds || 0);
                 });
                 cont.innerHTML = Object.keys(months).length ? Object.keys(months).sort().reverse().map(m => `
-                    <div class="glass-card p-5 rounded-2xl flex justify-between items-center shadow-md">
-                        <span class="font-bold text-lg">${m.replace('-','年')}月</span>
-                        <span class="text-blue-400 font-mono text-2xl">${(months[m]/3600).toFixed(1)} <small class="text-slate-500">h</small></span>
+                    <div class="glass-card p-5 rounded-2xl flex justify-between items-center">
+                        <span class="font-bold text-lg">${m.split('-')[0]} 年 ${m.split('-')[1]} 月</span>
+                        <span class="text-blue-400 font-mono text-xl">${formatTime(months[m])}</span>
                     </div>`).join('') : '<p class="text-center text-slate-500 italic">尚無閱讀數據</p>';
             }
 
             function closeModal() {
-                if(activeTimer && !confirm('計時中，關閉將不儲存，確定嗎？')) return;
+                if(activeTimer && !confirm('計時中，關閉將不儲存時間，確定嗎？')) return;
                 if(activeTimer) { clearInterval(activeTimer); activeTimer = null; }
                 document.getElementById('book-modal').classList.add('hidden');
             }
