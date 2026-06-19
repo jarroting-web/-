@@ -34,7 +34,6 @@
         .btn-danger { background: rgba(239, 68, 68, 0.1); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.2); }
         button:active { transform: scale(0.96); transition: 0.1s; }
         
-        /* 完讀次數的小標籤樣式 */
         .complete-badge {
             background: rgba(16, 185, 129, 0.2);
             color: #10b981;
@@ -67,12 +66,13 @@
                 </div>
             </header>
 
-            <!-- 新增書名 -->
+            <!-- 智慧搜尋與新增區 -->
             <section class="glass-card p-5 rounded-3xl mb-8 shadow-xl">
+                <input type="text" id="book-name-input" placeholder="搜尋或輸入新書名..." 
+                    class="w-full bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 mb-3 outline-none text-white focus:border-blue-500 text-base">
                 <div class="flex gap-2">
-                    <input type="text" id="book-name-input" placeholder="想讀什麼書？" 
-                        class="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 py-3 outline-none text-white focus:border-blue-500 text-base">
-                    <button id="add-book-btn" class="bg-blue-600 hover:bg-blue-500 px-5 py-3 rounded-xl font-bold transition shadow-lg">新增</button>
+                    <button id="search-btn" class="flex-1 bg-slate-700 hover:bg-slate-600 py-3 rounded-xl font-bold transition">搜尋</button>
+                    <button id="add-book-btn" class="flex-1 bg-blue-600 hover:bg-blue-500 py-3 rounded-xl font-bold transition">新增書籍</button>
                 </div>
             </section>
 
@@ -101,6 +101,9 @@
             const SUPABASE_URL = 'https://nzsjauiixrzfpkamwlfr.supabase.co';
             const SUPABASE_KEY = 'sb_publishable_37I7ZAUEw3W4YzruD71MtQ_JCeyPnrs';
             let _supabase, activeTimer, startTime;
+            let allBooks = []; // 存儲所有書籍數據
+            let allSessions = [];
+            let allCompletions = [];
 
             function formatTime(totalSec) {
                 if (totalSec <= 0) return "0 分鐘";
@@ -112,11 +115,18 @@
 
             async function init() {
                 _supabase = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+                document.getElementById('search-btn').onclick = () => renderShelf(document.getElementById('book-name-input').value.trim());
                 document.getElementById('add-book-btn').onclick = addBook;
                 document.getElementById('btn-shelf').onclick = () => switchTab('shelf');
                 document.getElementById('btn-stats').onclick = () => switchTab('stats');
                 document.getElementById('close-modal-btn').onclick = closeModal;
-                await loadBooks();
+                
+                // 監聽輸入框，打字時按下 Enter 直接搜尋
+                document.getElementById('book-name-input').onkeypress = (e) => {
+                    if (e.key === 'Enter') renderShelf(e.target.value.trim());
+                };
+
+                await fetchData();
             }
 
             function switchTab(tab) {
@@ -127,25 +137,45 @@
                 if(tab === 'stats') loadStats();
             }
 
-            async function addBook() {
-                const title = document.getElementById('book-name-input').value.trim();
-                if(!title) return;
-                await _supabase.from('books').insert([{ title }]);
-                document.getElementById('book-name-input').value = '';
-                await loadBooks();
-            }
-
-            async function loadBooks() {
-                const { data: books } = await _supabase.from('books').select('*').order('created_at', { ascending: false });
+            async function fetchData() {
+                const { data: books } = await _supabase.from('books').select('*');
                 const { data: sessions } = await _supabase.from('reading_sessions').select('*');
                 const { data: completions } = await _supabase.from('book_completions').select('*');
                 
-                const shelf = document.getElementById('book-shelf');
-                shelf.innerHTML = books?.length ? '' : '<p class="text-slate-500 italic py-10 text-center text-sm">書架目前是空的。</p>';
+                allBooks = books || [];
+                allSessions = sessions || [];
+                allCompletions = completions || [];
                 
-                books?.forEach(book => {
-                    const sec = sessions?.filter(s => s.book_id === book.id).reduce((a, b) => a + (b.duration_seconds || 0), 0) || 0;
-                    const compCount = completions?.filter(c => c.book_id === book.id).length || 0;
+                renderShelf();
+            }
+
+            // 渲染書架，包含過濾與排序邏輯
+            function renderShelf(filterKeyword = "") {
+                const shelf = document.getElementById('book-shelf');
+                
+                // 1. 計算每本書的最後活動時間（排序用）
+                const booksWithLastActive = allBooks.map(book => {
+                    const bookSessions = allSessions.filter(s => s.book_id === book.id);
+                    // 找出最後一次計時的開始時間，如果沒計時過，就用建立時間
+                    const lastActive = bookSessions.length > 0 
+                        ? Math.max(...bookSessions.map(s => new Date(s.start_time).getTime()))
+                        : new Date(book.created_at).getTime();
+                    return { ...book, lastActive };
+                });
+
+                // 2. 排序：最後活動時間越晚（數字越大）越靠前
+                let sortedBooks = booksWithLastActive.sort((a, b) => b.lastActive - a.lastActive);
+
+                // 3. 過濾搜尋關鍵字
+                if (filterKeyword) {
+                    sortedBooks = sortedBooks.filter(b => b.title.toLowerCase().includes(filterKeyword.toLowerCase()));
+                }
+
+                shelf.innerHTML = sortedBooks.length ? '' : `<p class="text-slate-500 italic py-10 text-center text-sm">${filterKeyword ? '找不到符合的書目' : '書架目前是空的。'}</p>`;
+                
+                sortedBooks.forEach(book => {
+                    const sec = allSessions.filter(s => s.book_id === book.id).reduce((a, b) => a + (b.duration_seconds || 0), 0);
+                    const compCount = allCompletions.filter(c => c.book_id === book.id).length;
                     
                     const div = document.createElement('div');
                     div.className = 'glass-card p-5 rounded-3xl flex justify-between items-center cursor-pointer active:bg-slate-800 transition shadow-md relative';
@@ -157,26 +187,45 @@
                             </div>
                             <p class="text-slate-500 text-xs mt-1 tracking-wide">累計：<span class="text-blue-400 font-mono font-bold">${formatTime(sec)}</span></p>
                         </div>
-                        <div class="bg-slate-800 h-10 w-10 rounded-full flex items-center justify-center text-blue-400 ml-4">→</div>
+                        <div class="bg-slate-800 h-10 w-10 rounded-full flex items-center justify-center text-blue-400 ml-4 font-bold text-xl">→</div>
                     `;
                     div.onclick = () => showDetail(book.id);
                     shelf.appendChild(div);
                 });
 
+                // 本月計算
                 const now = new Date();
                 const startM = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-                const mSec = sessions?.filter(s => s.start_time >= startM).reduce((a, b) => a + (b.duration_seconds || 0), 0) || 0;
+                const mSec = allSessions.filter(s => s.start_time >= startM).reduce((a, b) => a + (b.duration_seconds || 0), 0);
                 document.getElementById('monthly-total').innerText = formatTime(mSec);
             }
 
+            async function addBook() {
+                const title = document.getElementById('book-name-input').value.trim();
+                if(!title) return;
+                
+                // 檢查是否已存在
+                const exists = allBooks.find(b => b.title === title);
+                if (exists) {
+                    if (confirm(`書架中已有「${title}」，要直接開啟它嗎？`)) {
+                        showDetail(exists.id);
+                        return;
+                    }
+                }
+
+                await _supabase.from('books').insert([{ title }]);
+                document.getElementById('book-name-input').value = '';
+                await fetchData();
+            }
+
             async function showDetail(id) {
-                const { data: book } = await _supabase.from('books').select('*').eq('id', id).single();
-                const { data: sessions } = await _supabase.from('reading_sessions').select('*').eq('book_id', id).order('created_at', {ascending: false});
-                const { data: comps } = await _supabase.from('book_completions').select('*').eq('book_id', id); // 修正為 book_id
+                const book = allBooks.find(b => b.id === id);
+                const sessions = allSessions.filter(s => s.book_id === id).sort((a,b) => new Date(b.start_time) - new Date(a.start_time));
+                const comps = allCompletions.filter(c => c.book_id === id);
                 
                 document.getElementById('book-modal').classList.remove('hidden');
-                const total = sessions?.reduce((a,b) => a + (b.duration_seconds || 0), 0) || 0;
-                const compCount = comps?.length || 0;
+                const total = sessions.reduce((a,b) => a + (b.duration_seconds || 0), 0);
+                const compCount = comps.length;
                 const content = document.getElementById('modal-content');
                 
                 content.innerHTML = `
@@ -185,32 +234,25 @@
                             <h2 class="text-xl font-bold mb-1 text-white">${book.title}</h2>
                             <p class="text-blue-400 text-sm font-mono mb-6">總時數：${formatTime(total)}</p>
                         </div>
-                        
-                        <!-- 右上方次數標記 -->
                         <div class="absolute top-0 right-8">
                             ${compCount > 0 ? `<span class="complete-badge">已讀完 ${compCount} 次</span>` : ''}
                         </div>
-
                         <div class="flex gap-3 mb-8">
-                            <button id="timer-ctrl" class="flex-1 bg-blue-600 py-4 rounded-2xl font-bold text-lg shadow-lg">開始閱讀計時</button>
+                            <button id="timer-ctrl" class="flex-1 bg-blue-600 py-4 rounded-2xl font-bold text-lg shadow-lg">開始閱讀</button>
                             <button id="comp-btn" class="bg-emerald-700 px-5 rounded-2xl font-bold">讀完</button>
                         </div>
-
-                        <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3">閱讀紀錄</h4>
+                        <h4 class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-3 border-b border-slate-800 pb-1">閱讀紀錄</h4>
                         <div class="space-y-2 max-h-48 overflow-y-auto custom-scrollbar mb-8">
-                            ${sessions?.length ? sessions.map(s => `
+                            ${sessions.length ? sessions.map(s => `
                                 <div class="flex justify-between items-center bg-slate-900/50 p-3 rounded-xl border border-slate-800 text-xs">
                                     <span class="text-slate-500">${new Date(s.start_time).toLocaleDateString()} ${new Date(s.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit', hour12: false})}</span>
                                     <div class="flex items-center gap-3">
                                         <span class="font-mono text-blue-300 font-bold">${formatTime(s.duration_seconds)}</span>
                                         <button onclick="window._deleteSession('${s.id}', '${id}')" class="text-red-500 px-2 py-1">刪除</button>
                                     </div>
-                                </div>`).join('') : '<p class="text-slate-600 italic text-xs">目前還沒有計時紀錄</p>'}
+                                </div>`).join('') : '<p class="text-slate-600 italic text-xs">目前還沒有紀錄</p>'}
                         </div>
-
-                        <button id="delete-book-btn" class="w-full btn-danger py-4 rounded-2xl text-xs font-bold transition">
-                            移除這本書
-                        </button>
+                        <button id="delete-book-btn" class="w-full btn-danger py-4 rounded-2xl text-xs font-bold">移除這本書</button>
                     </div>`;
 
                 document.getElementById('timer-ctrl').onclick = () => toggleTimer(id);
@@ -221,13 +263,15 @@
             window._deleteSession = async (sid, bid) => {
                 if(!confirm('刪除這筆紀錄？')) return;
                 await _supabase.from('reading_sessions').delete().eq('id', sid);
-                await showDetail(bid); await loadBooks();
+                await fetchData();
+                showDetail(bid);
             };
 
             async function deleteBook(id) {
                 if(!confirm('移除整本書？這會刪除所有紀錄。')) return;
                 await _supabase.from('books').delete().eq('id', id);
-                closeModal(); await loadBooks();
+                closeModal();
+                await fetchData();
             }
 
             async function toggleTimer(id) {
@@ -237,42 +281,42 @@
                     btn.classList.replace('bg-blue-600', 'bg-red-600');
                     activeTimer = setInterval(() => {
                         const s = Math.floor((new Date() - startTime)/1000);
-                        btn.innerText = `結束 (${Math.floor(s/60)}m ${s%60}s)`;
+                        btn.innerText = `計時 (${Math.floor(s/60)}m ${s%60}s)`;
                     }, 1000);
                 } else {
                     const d = Math.floor((new Date() - startTime)/1000);
                     clearInterval(activeTimer); activeTimer = null;
                     btn.innerText = "儲存中...";
                     await _supabase.from('reading_sessions').insert([{ book_id: id, start_time: startTime.toISOString(), end_time: new Date().toISOString(), duration_seconds: d }]);
-                    await showDetail(id); await loadBooks();
+                    await fetchData();
+                    showDetail(id);
                 }
             }
 
             async function markComp(id) {
                 if(confirm('確認已讀完一遍？')) { 
                     await _supabase.from('book_completions').insert([{ book_id: id }]); 
-                    await showDetail(id); 
-                    await loadBooks();
+                    await fetchData();
+                    showDetail(id);
                 }
             }
 
-            async function loadStats() {
-                const { data: ss } = await _supabase.from('reading_sessions').select('*');
+            function loadStats() {
                 const cont = document.getElementById('stats-container');
                 const months = {};
-                ss?.forEach(s => {
+                allSessions.forEach(s => {
                     const m = s.start_time.slice(0, 7);
                     months[m] = (months[m] || 0) + (s.duration_seconds || 0);
                 });
                 cont.innerHTML = Object.keys(months).length ? Object.keys(months).sort().reverse().map(m => `
-                    <div class="glass-card p-6 rounded-3xl flex justify-between items-center">
-                        <span class="font-bold text-blue-50">${m.replace('-',' / ')}</span>
+                    <div class="glass-card p-6 rounded-3xl flex justify-between items-center shadow-lg">
+                        <span class="font-bold text-blue-50 text-lg">${m.replace('-',' / ')}</span>
                         <span class="text-blue-400 font-mono text-xl font-bold">${formatTime(months[m])}</span>
-                    </div>`).join('') : '<p class="text-center text-slate-500 text-sm">目前還沒有任何閱讀數據。</p>';
+                    </div>`).join('') : '<p class="text-center text-slate-500 text-sm">目前還沒有數據。</p>';
             }
 
             function closeModal() {
-                if(activeTimer && !confirm('計時中，確定要關閉？')) return;
+                if(activeTimer && !confirm('計時中，確定關閉？')) return;
                 if(activeTimer) { clearInterval(activeTimer); activeTimer = null; }
                 document.getElementById('book-modal').classList.add('hidden');
             }
